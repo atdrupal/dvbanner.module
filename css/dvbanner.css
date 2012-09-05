@@ -1,0 +1,18 @@
+/* $Id: dvbanner.css 207 2008-10-09 05:05:32Z The Hong $ */
+
+.block.block-dvbanner {
+  padding: 0;
+}
+
+.block-dvbanner h2 {
+  display: none;
+}
+
+.block-dvbanner .content {
+  border-style: none;
+  padding: 0;
+  margin: 0;
+  padding: 0;
+  text-align: center;
+}
+

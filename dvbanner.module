@@ -1,0 +1,601 @@
+<?php
+// $Id: dvbanner.module 527 2008-11-28 10:18:38Z The Hong $
+
+/**
+ * Implementation of hook_help ()
+ */
+function dvbanner_help ($section) {
+  switch ($section) {
+    case 'admin/build/block/dvbanner':
+      require_once dirname (__FILE__) . '/dvbanner.help.inc';
+      return call_user_func("_dvbanner_help_dvbanner");
+
+    case 'admin/build/block/dvbanner/profiles':
+      require_once dirname (__FILE__) . '/dvbanner.help.inc';
+      return call_user_func("_dvbanner_help_dvbanner_profiles");
+  }
+}
+
+/**
+ * Implementation of hook_perm
+ */
+function dvbanner_perm () {
+  return array('administer banner');
+}
+
+/**
+ * Implementation of hook_menu
+ */
+function dvbanner_menu ($may_cache) {
+  if ($may_cache) {
+    $items = array (
+      array (
+        'path' => 'admin/build/block/dvbanner',
+        'title' => t('Banner'),
+        'access' => user_access ('administer banner'),
+        'callback' => 'dvbanner_admin',
+        'callback arguments' => array ('dvbanner_banner_list'),
+        'type' => MENU_LOCAL_TASK
+      ),
+      array (
+        'path' => 'admin/build/block/dvbanner/block',
+        'title' => t('Banner block'),
+        'type' => MENU_DEFAULT_LOCAL_TASK
+      ),
+      array (
+        'path' => 'admin/build/block/dvbanner/banner',
+        'title' => t('Banner item'),
+        'callback' => 'dvbanner_admin',
+        'callback arguments' => array ('dvbanner_item_list'),
+        'type' => MENU_LOCAL_TASK
+      ),
+      array (
+        'path' => 'admin/build/block/dvbanner/banner/edit',
+        'title' => t('Banner item'),
+        'callback' => 'dvbanner_admin',
+        'callback arguments' => array ('dvbanner_item_edit'),
+        'type' => MENU_LOCAL_TASK
+      ),
+      array (
+        'path' => 'admin/build/block/dvbanner/report',
+        'title' => t('Report'),
+        'callback' => 'dvbanner_admin',
+        'callback arguments' => array ('dvbanner_report'),
+        'type' => MENU_LOCAL_TASK
+      ),
+
+      // Player profile
+      array (
+        'path' => 'admin/build/block/dvbanner/profiles',
+        'title' => t('Player profiles'),
+        'callback' => 'dvbanner_admin',
+        'callback arguments' => array ('dvbanner_profile_list'),
+        'type' => MENU_LOCAL_TASK,
+        'weight' => 10
+      ),
+      array (
+        'path' => 'admin/build/block/dvbanner/profiles/add',
+        'title' => t('Add new player profile'),
+        'callback' => 'dvbanner_admin',
+        'callback arguments' => array ('dvbanner_profile_add'),
+        'type' => MENU_CALLBACK,
+      ),
+      // ! Player profile
+
+      array (
+        'path' => 'admin/build/block/dvbanner/add-item',
+        'title' => t('Add banner item'),
+        'type' => MENU_CALLBACK,
+        'weight' => 1,
+        'callback' => 'dvbanner_admin',
+        'callback arguments' => array ('dvbanner_item_add')
+      ),
+      array (
+        'path' => 'admin/build/block/dvbanner/add-block',
+        'title' => t('Add banner block'),
+        'type' => MENU_CALLBACK,
+        'weight' => 1,
+        'callback' => 'dvbanner_admin',
+        'callback arguments' => array ('dvbanner_block_add')
+      ),
+      array (
+        'path' => 'banner',
+        'access' => true,
+        'callback' => 'dvbanner_click',
+        'type' => MENU_CALLBACK
+      ),
+      array (
+        'path'      => 'dvbanner/autocomplete',
+        'access'    => true,
+        'callback'  => 'dvbanner_autocomplete',
+        'type'      => MENU_CALLBACK
+      ),
+
+      // static playlist path
+      array (
+        'path'      => file_directory_path () . '/dvbanner/playlist',
+        'access'    => user_access ('access content'),
+        'callback'  => 'dvbanner_playlist',
+      ),
+
+    );
+  }
+
+  return $items;
+}
+
+/**
+ * Implementation of hook_block
+ */
+function dvbanner_block ($op = 'list', $delta = 0, $edit = array()) {
+  switch ($op) {
+    case 'list':
+      require_once dirname (__FILE__) . '/dvbanner.admin.inc';
+      return _dvbanner_block_list ();
+
+    case 'view':
+      // Hiển thị player thông qua đối tượng được định nghĩa trong swfobject.js
+      drupal_add_js (drupal_get_path ('module', 'dvbanner') . '/mediaplayer/swfobject.js', 'footer');
+
+      // Thêm một số định dạng chung cho các dvbanner block
+      drupal_add_css (drupal_get_path ('module', 'dvbanner') . '/css/dvbanner.css');
+
+      $output = dvbanner_block_view ($delta);
+
+      if (!empty ($output)) {
+        return array (
+          'subject' => $block->title,
+          'content' => $output
+        );
+      }
+  }
+}
+
+/**
+ * Wrapper for admin pages
+ */
+function dvbanner_admin ($page) {
+  require_once dirname (__FILE__) . '/dvbanner.admin.inc';
+  return _dvbanner_admin ($page);
+}
+
+/**
+ * Xử lý và trả về nội dung của banner block.
+ * @param $delta
+ */
+function dvbanner_block_view ($delta) {
+  $info = dvbanner_block_get_info ($delta);
+
+  // Không có thông tin gì để xử lý
+  if (!$info) {
+    return;
+  }
+
+  // Tuỳ chỉnh kích thước banner item
+  if (isset($info['size']) && !empty($info['size'])) {
+    list ($height, $width) = explode (',', $info['size']);
+  }
+
+  // Biến chứa nội dung block được trả về
+  $output = '';
+
+  if ($info['type'] == 'flv') {
+    if (count($info['items']) > 1) {
+      $output .= theme ('dvbanner_player', $delta, $info['pid'], 'flv');
+    }
+    else {
+      $output .= theme ('dvbanner_player', $info['items'][0], $info['pid'], 'flv');
+    }
+  }
+  elseif ($info['type'] == 'image') {
+    if (is_array ($info['items'])) {
+      if (count ($info['items']) > 1 && $info['use_flash']) {
+        $output .= theme ('dvbanner_player', $delta, $info['pid'], 'image');
+      }
+      else {
+        // $image_preset = _imagecache_preset_load ($info['presetid']);
+        $image_preset = imagecache_preset($info['presetid']);
+
+        foreach ($info['items'] as $item) {
+          $output .= theme ('dvbanner_image', $item, $image_preset, $info['size']);
+        }
+      }
+    }
+  }
+
+  return $output;
+}
+
+/**
+ * Get banner block details
+ */
+function dvbanner_block_get_info ($delta, $limit = null) {
+  // Truy vấn lấy thông tin block dựa trên $delta
+  $info = db_fetch_object (db_query (
+    "SELECT * FROM {dvbanner_block} WHERE delta = %d",
+    $delta
+  ));
+
+  if (is_object ($info)) {
+    // Chuyển đổi dữ liệu từ dạng lưu trữ sang sử dụng
+    $info->data = unserialize ($info->data);
+
+    // block title
+    $info->data['title'] = $info->title;
+
+    // Block type
+    $info->data['type'] = $info->type;
+
+    // profile ID
+    $info->data['pid'] = empty($info->pid) ? 1 : $info->pid;
+
+    // Tải các banner items vào biến thông tin
+    $info->data['items'] = dvbanner_get_item ($delta, is_numeric ($limit) ? $limit : $info->data['limitation']);
+
+    return $info->data;
+  }
+
+  return;
+}
+
+/**
+ * Tìm các banner item của banner block
+ *
+ * @param int $delta Mã số phân biệt banner block
+ * @param int $limit Giới hạn kết quả trả về
+ */
+function dvbanner_get_item ($delta, $limit = 1) {
+  static $items = array ();
+
+  if (!isset ($items[$delta])) {
+    $q = db_query (
+      "SELECT bi.bid, i.title, i.data FROM {dvbanner_block_items} bi"
+      . " INNER JOIN {dvbanner_item} i ON i.bid = bi.bid"
+      . " WHERE status = 1 AND bi.delta = %d ORDER BY RAND() LIMIT %d",
+      $delta, $limit
+    );
+
+    while ($item = db_fetch_object ($q)) {
+      $item->data = unserialize ($item->data);
+      $items[$delta][] = $item;
+    }
+  }
+
+  return $items[$delta];
+}
+
+/**
+ * Enter description here...
+ *
+ * @return unknown
+ */
+function dvbanner_profile_attributes () {
+  require dirname (__FILE__) . '/inc/profile_attributes.inc';
+
+  return $attributes;
+}
+
+/**
+ * Lấy chi tiết profile dựa trên Profile ID
+ */
+function dvbanner_profile_get ($pid = 1) {
+  $profile = db_fetch_object (db_query ("SELECT * FROM {dvbanner_profile} WHERE pid = %d", $pid));
+  if ($profile) {
+    $profile->data = unserialize ($profile->data);
+
+    return $profile;
+  }
+}
+
+/**
+ * Retrieve a pipe delimited string of autocomplete suggestions for existing banner items
+ */
+function dvbanner_autocomplete () {
+  require dirname (__FILE__) . '/inc/autocomplete.inc';
+}
+
+/**
+ * Banner clicking handler
+ *
+ * @param int $bid
+ *  Mã số banner item
+ */
+function dvbanner_click ($bid = '') {
+  $bid = preg_replace ('|,.+$|', '', base64_decode ($bid));
+
+  if (!is_numeric ($bid)) {
+    return drupal_not_found();
+  }
+
+  // Cập nhật số lần banner item được click
+  db_query(
+    "UPDATE {dvbanner_item} SET click = click + 1 WHERE bid = %d",
+    $bid
+  );
+
+  // Lưu chi tiết thông tin thống kê
+  db_query (
+    "INSERT INTO {dvbanner_click} (bid, hostname, timestamp) VALUES (%d, '%s', %d)",
+    $bid, $_SERVER['REMOTE_ADDR'], time()
+  );
+
+  // Tìm path tương ứng
+  $data = unserialize (db_result (db_query (
+    "SELECT data FROM {dvbanner_item} WHERE bid = %d",
+    $bid
+  )));
+
+  if (!empty ($data['link'])) {
+    drupal_goto ($data['link']);
+  }
+}
+
+/**
+ * Implement hook_form_alter
+ */
+function dvbanner_form_alter ($form_id, &$form) {
+  if ($form_id == 'block_admin_configure' && arg (4) == 'dvbanner' && is_numeric (arg (5))) {
+  	require dirname (__FILE__) . '/inc/hook/form_alter/block_admin_configure.inc';
+  }
+}
+
+/**
+ * Enter description here...
+ *
+ * @return unknown
+ */
+function dvbanner_item_attributes () {
+  require dirname (__FILE__) . '/inc/item_attributes.inc';
+
+  return $attributes;
+}
+
+/**
+ * Implementation of hook_forms
+ *
+ * Đăng ký các biểu mẫu của ứng dụng với hệ thống
+ */
+function dvbanner_forms () {
+  $form_ids = array (
+  	'profile_delete',
+  	'item_edit'
+  );
+
+  foreach ($form_ids as $form_id) {
+    $forms['dvbanner_' . $form_id] = array (
+     'callback' => '_dvbanner_forms',
+     'callback arguments' => array ($form_id)
+    );
+  }
+
+  return $forms;
+}
+
+/**
+ * Form submit handlers
+ *
+ */
+function _dvbanner_forms_submit ($form_id, $form_values) {
+	$form_id = preg_replace ('|^dvbanner_|', '', $form_id);
+
+  switch ($form_id) {
+  	// Kịch bản xử lý cho biểu mẫu cấu hình banner block
+  	case 'block_admin_configure':
+  		require dirname (__FILE__) . '/inc/hook/form_alter/block_admin_configure_submit.inc';
+  		break;
+  }
+}
+
+/**
+ * Theming functions
+ * @{
+ *
+ */
+
+/**
+ * Trình bày image banner item
+ * @param
+ *  Kích thước tuỳ chỉnh. Hệ thống vẫn cần tuỳ chọn này, vì thư viện xử lý ảnh không xử lý được các ảnh gif
+ */
+function theme_dvbanner_image ($item, $image_preset, $size = '') {
+  $image_preset = $image_preset['presetname'];
+
+  $output = '';
+
+  // Tập tin được lưu ở bên trong site (local file)
+  if (!preg_match ('|http://|', $item->data['path'])) {
+    $item->data['path'] = base_path () . file_directory_path () . "/imagecache/{$image_preset}/{$item->data[path]}";
+  }
+
+  $attr = array ();
+  $attr['src'] = $item->data['path'];
+  $attr['class'] = 'dvbanner-item';
+  $attr['id'] = 'dvbanner-item-' . $item->bid;
+
+  // kích thước tuỳ chỉnh
+  if (!empty ($size)) {
+    list ($height, $width) = explode (',', $size);
+    $attr['height'] = is_numeric ($height) ? $height . 'px' : $height;
+    $attr['width'] = is_numeric ($height) ? $width . 'px' : $width;
+  }
+
+  $output .= '<img ' . drupal_attributes ($attr) . ' />';
+
+  // Trường hợp có liên kết
+  if (!empty ($item->data['link'])) {
+    $attr = array ();
+
+    $attr['id'] = 'dvbanner-item-link-' . $item->bid;
+    $attr['class'] = 'dvbanner-link';
+    $attr['href'] = url('banner/' . base64_encode ($item->bid . ',' . time()));
+    $attr['target'] = '_blank';
+
+    $output = '<a ' . drupal_attributes ($attr) . '>' . $output . '</a>';
+  }
+
+  return $output;
+}
+
+/**
+ * Trình bày flash player dựa trên các thiết lập
+ * @param $item
+ * - object: Trường hợp trình bày player đơn (chỉ chơi 1 file)
+ * - int: Player chơi một playlist
+ */
+function theme_dvbanner_player ($item, $profile_id = 1, $type) {
+  // Tải lên profile tương ứng
+  $profile = dvbanner_profile_get($profile_id);
+
+  // Thêm flv path vào thông số hiển thị
+  if (is_numeric($item)) {
+  	$profile->data['file'] = url (
+  	 file_directory_path () . "/dvbanner/playlist/{$item}.xml",
+  	 null,
+  	 null,
+  	 true
+  	);
+
+  	$tmp = $item;
+  	$item = new stdClass();
+  	$item->bid = $tmp;
+  }
+  else {
+    if (preg_match ('|^http://|', $item->data['path'])) {
+      $profile->data['file'] = $item->data['path'];
+    }
+    else {
+      $profile->data['file'] = check_url(base_path () . $item->data['path']);
+    }
+  }
+
+  // Đường dẫn đễn flv/image player
+  if ($type == 'flv') {
+    $player_path = base_path () . drupal_get_path ('module', 'dvbanner') . "/mediaplayer/flvplayer.swf";
+  }
+  elseif ($type == 'image') {
+    $player_path = base_path () . drupal_get_path ('module', 'dvbanner') . "/mediaplayer/imagerotator.swf";
+  }
+
+  // Xây dựng chuỗi HTML xuất ra
+  $output = "<div id='dvbanner-item-{$item->bid}'></div>\n";
+  $output .= "<script type='text/javascript'><!--\n";
+  $output .= "var s1 = new SWFObject('". $player_path ."', 'mediaplayer', '{$profile->data[width]}', '{$profile->data[height]}', 8);\n";
+  $output .= "s1.addParam('allowscriptaccess', 'always');\n";
+  $output .= "s1.addParam('allowfullscreen', 'true');\n";
+
+  // cho phép click trong flash
+  $output .= "s1.addVariable('linkfromdisplay', 'true');\n";
+
+  // nằm dưới đối với các fly out menu
+  $output .= "s1.addParam('wmode', 'transparent');\n";
+  foreach ($profile->data as $key => $val) {
+    if (in_array ($key, array ('logo', 'image'))) {
+      $val = base_path () . $val;
+    }
+
+    $output .= "s1.addVariable('$key', '". str_replace ('#', '0x', $val) ."');\n";
+  }
+  $output .= "s1.write('dvbanner-item-{$item->bid}');\n";
+  $output .= "--></script>";
+
+  return $output;
+}
+
+/**
+ * Create static save store playlist rss of banner items
+ *
+ * @param string $file_name
+ * @return string
+ */
+function dvbanner_playlist ($file_name) {
+  // make sure right pattern
+  if (!preg_match ('|^[0-9]+\.xml$|', $file_name)) {
+    return drupal_not_found ();
+  }
+
+  // get banner block item from file name
+  $bbid = (int) str_replace ('.xml', '', $file_name);
+
+  // render the XML data
+  $xml = dvbanner_playlist_rss($bbid);
+
+  if (!empty ($xml)) {
+    // check diretories
+    $dir = file_directory_path ();
+    $dvbanner_dir = $dir . '/dvbanner';
+    $playlist_dir = $dvbanner_dir . '/playlist';
+    $file_path    = "{$playlist_dir}/{$bbid}.xml";
+    if (
+      file_check_directory ($dvbanner_dir, FILE_CREATE_DIRECTORY)
+      && file_check_directory ($playlist_dir, FILE_CREATE_DIRECTORY)
+      && !is_file ($file_path)
+    ) {
+      file_save_data ($xml, $file_path, FILE_EXISTS_REPLACE);
+    }
+
+    // set HTTP header that this response is in XML format
+    drupal_set_header('Content-Type: application/xml; charset=utf-8');
+
+    // print out the XML data
+    echo $xml;
+  }
+  else {
+    echo '<!-- Empty -->';
+  }
+}
+
+/**
+ * Render banner items RSS by banner block ID.
+ */
+function dvbanner_playlist_rss ($delta = 0) {
+  if (!is_numeric ($delta) || !$info = dvbanner_block_get_info ($delta)) {
+    return false;
+  }
+
+  $profile = dvbanner_profile_get($info['pid']);
+
+  if (is_numeric ($info['presetid'])) {
+    $image_preset = imagecache_preset ($info['presetid']);
+    $image_preset = $image_preset['presetname'];
+  }
+
+  foreach ($info['items'] as $item) {
+    // chỉnh sửa cho hình ảnh phù hợp với image preset đã thiết lập
+    if (is_numeric ($info['presetid'])) {
+      // Tập tin được lưu ở bên trong site (local file)
+      if (!preg_match ('|http://|', $item->data['path'])) {
+        $item->data['path'] = file_directory_path () . "/imagecache/{$image_preset}/{$item->data[path]}";
+      }
+    }
+
+    $attributes = array ();
+    $attributes[] = "<title>{$item->title}</title>";
+    $attributes[] = "<creator>".variable_get('site_name', '')."</creator>";
+    if (preg_match ('|^http:|', $item->data['path'])) {
+      $attributes[] = "<location>" . $item->data['path'] . "</location>";
+    }
+    else {
+      $attributes[] = "<location>" . url ($item->data['path'], null, null, true) . "</location>";
+    }
+    if (!empty ($item->data['image']) || !empty($profile->data['image'])) {
+      $attributes[] = "<image>" . base_path () . (empty($item->data['image']) ? $profile->data['image'] : $item->data['image'])."</image>";
+    }
+
+    // Image link
+    if ($item->data['link']) {
+      $attributes[] = "<info>" . url('banner/' . base64_encode ($item->bid . ',' . time())) . "</info>";
+    }
+
+    $items .= "<track>" . implode('', $attributes) . "</track>";
+  }
+
+  $output .= <<<XML
+<playlist version="1" xmlns="http://xspf.org/ns/0/">
+	<title>DVBanner Playlist</title>
+	<info>http:/xspf.org/xspf-v1.html</info>
+	<trackList>{$items}</trackList>
+</playlist>
+XML;
+
+  return $output;
+}

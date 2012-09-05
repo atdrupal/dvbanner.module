@@ -1,0 +1,235 @@
+<?php
+// $Id: dvbanner.install 210 2008-10-09 06:55:45Z The Hong $
+
+/**
+ * Implementation of hook_install
+ *
+ */
+function dvbanner_install () {
+  db_query ("
+    CREATE TABLE {dvbanner_block} (
+      delta tinyint(4) NOT NULL,
+      type varchar(32) NOT NULL,
+      title varchar(64) NOT NULL,
+      pid int(10) unsigned NOT NULL,
+      data text NOT NULL,
+      PRIMARY KEY (delta),
+      KEY type (type)
+    );
+  ");
+  
+  db_query ("
+    CREATE TABLE {dvbanner_item} (
+      bid int(10) unsigned NOT NULL auto_increment,
+      type VARCHAR(32) NOT NULL, 
+      title varchar(64) collate utf8_unicode_ci NOT NULL,
+      status tinyint(1) NOT NULL,
+      click int(10) NOT NULL,
+      data text NOT NULL,
+      weight tinyint(4) NOT NULL,
+      PRIMARY KEY  (bid),
+      KEY type (type)
+    )
+  ");
+  
+  db_query ("
+    CREATE TABLE {dvbanner_block_items} (
+      delta int(10) unsigned NOT NULL auto_increment,
+      bid int(10) unsigned NOT NULL default 0,
+      PRIMARY KEY  (delta, bid),
+      KEY delta (delta),
+      KEY bid (bid)
+    )
+  ");
+  
+  db_query ("
+    CREATE TABLE {dvbanner_click} (
+      cid int(10) unsigned NOT NULL auto_increment,
+      bid int(10) unsigned NOT NULL default '0',
+      hostname varchar(128) NOT NULL,
+      timestamp int(11) NOT NULL,
+      PRIMARY KEY  (cid),
+      KEY bid (bid)
+    );
+  ");
+  
+  db_query ("
+     CREATE TABLE {dvbanner_profile} (
+      pid int(10) unsigned NOT NULL auto_increment,
+      name varchar(128) NOT NULL,
+      data text NOT NULL,
+      PRIMARY KEY  (pid),
+      KEY name (name)
+    ) ENGINE=MyISAM;"
+  );
+
+  // Tạo profile mặc định
+  $pid = db_next_id ('{dvbanner_profile}_pid');
+  db_query (
+  "INSERT INTO {dvbanner_profile} (pid, name, data) VALUES (%d, '%s', '%s')",
+    $pid, 'Default', serialize (array ())
+  );
+  
+  // Tạo thư mục dvbanner && dvbanner/profiles
+  $paths = array (
+    file_directory_path () . '/dvbanner', 
+    file_directory_path () . '/dvbanner/profiles'
+  );
+
+  foreach ($paths as $path) {
+  	file_check_directory ($path, FILE_CREATE_DIRECTORY);
+  }
+}
+
+/**
+ * Implementation of hook_uninstall
+ *
+ */
+function dvbanner_uninstall () {
+  // Xoá các banner item files
+  $result = db_query ("SELECT data FROM {dvbanner_item}");
+  
+  while ($row = db_fetch_object ($result)) {
+    $data = unserialize ($row->data);
+    
+    file_delete ($data[path]);
+    file_delete ($data[image]);
+    file_delete ($data[logo]);
+  }
+  
+  if (db_table_exists ('dvbanner_block')) {
+    db_query ("DROP TABLE {dvbanner_block}");
+  }
+  
+  if (db_table_exists ('dvbanner_block_items')) {
+    db_query ("DROP TABLE {dvbanner_block_items}");
+  }
+  
+  if (db_table_exists ('dvbanner_item')) {
+    db_query ("DROP TABLE {dvbanner_item}");
+  }
+  
+  if (db_table_exists ('dvbanner_click')) {
+    db_query ('DROP TABLE {dvbanner_click}');
+  }
+  
+  if (db_table_exists ('dvbanner_profile')) {
+    db_query ("DROP TABLE {dvbanner_profile}");
+  }
+  
+  db_query ("DELETE FROM {blocks} WHERE module = 'dvbanner'");
+}
+
+/**
+ * Thay đổi cách lưu trữ các banner items của banner block
+ *
+ */
+function dvbanner_update_1 () {
+  // Tạo bảng mới
+  db_query ("
+    CREATE TABLE {dvbanner_block_items} (
+      delta int(10) unsigned NOT NULL auto_increment,
+      bid int(10) unsigned NOT NULL default 0,
+      PRIMARY KEY  (delta, bid),
+      KEY delta (delta),
+      KEY bid (bid)
+    )
+  ");
+  
+  // Di chuyển dữ liệu từ vị trí cũ sang vị trí mới
+  $q = db_query ("SELECT delta, item FROM {dvbanner_block}");
+  while ($v = db_fetch_object ($q)) {
+    $items = explode (',', $v->item);
+    
+    foreach ($items as $item) {
+      $ret[] = db_query (
+        "INSERT INTO {dvbanner_block_items} (delta, bid) VALUES (%d, %d)",
+        $v->delta, $item
+      );
+    }
+  }
+  
+  // Xoá cột item hiện tại
+  db_query ("ALTER TABLE {dvbanner_block} DROP item");
+  
+  return array ();
+}
+
+/**
+ * Tạo bảng lưu trữ cá player profile
+ *
+ */
+function dvbanner_update_2 () {
+	$ret = array ();
+	
+	$ret[] = update_sql ("
+		 CREATE TABLE {dvbanner_profile} (
+	    pid int(10) unsigned NOT NULL auto_increment,
+	    name varchar(128) NOT NULL,
+	    data text NOT NULL,
+	    PRIMARY KEY  (pid),
+	    KEY name (name)
+	  ) ENGINE=MyISAM;"
+	);
+	
+	// Tạo profile mặc định
+	$pid = db_next_id ('{dvbanner_profile}_pid');
+	db_query (
+		"INSERT INTO {dvbanner_profile} (pid, name, data) VALUES (%d, '%s', '%s')",
+		$pid, 'Default', serialize (array ())
+	);
+	
+	return $ret;
+}
+
+/**
+ * Thêm banner block type và banner item type
+ * Mỗi item type có phương thức trình bày riêng
+ *
+ */
+function dvbanner_update_3 () {
+	// Thay đổi cấu trúc dữ liệu
+	db_query ("ALTER TABLE {dvbanner_block} ADD type VARCHAR( 32 ) NOT NULL AFTER delta;");
+	db_query ("ALTER TABLE {dvbanner_block} ADD INDEX (type)");
+	db_query ("ALTER TABLE {dvbanner_item} ADD type VARCHAR( 32 ) NOT NULL AFTER bid;");
+	db_query ("ALTER TABLE {dvbanner_item} ADD INDEX (type)");
+	
+	// Tạm thời gán các type cho mọi banner block thành 'image' 
+	db_query ("UPDATE {dvbanner_block} SET type = 'image'");
+	db_query ("UPDATE {dvbanner_item} SET type = 'image'");
+	
+	// Tìm các banner item là flash, từ đó, thay đổi type cho các banner block chứa nó
+	$q = db_query ("SELECT bid FROM {dvbanner_item} WHERE data LIKE '%.flv%'");
+	while ($v = db_fetch_object ($q)) {
+		// Thay đổi type có item tương ứng thành flv
+		db_query ("UPDATE {dvbanner_item} SET type = 'flv' WHERE bid = %d", $v->bid);
+		
+		// thay đổi các block có chứa nó thành flv
+		$qq = db_query (
+			"SELECT b.delta FROM {dvbanner_block} b"
+			. " INNER JOIN {dvbanner_block_items} bi ON bi.delta = b.delta"
+			. " WHERE bi.bid = %d",
+			$v->bid
+		);
+		
+		while ($vv = db_fetch_object ($qq)) {
+			db_query ("DELETE FROM {dvbanner_block} WHERE delta = %d", $vv->delta);
+		}
+	}
+	
+	return array ();
+}
+
+/**
+ * Thêm field pid (profile ID) cho bảng {dvbanner_block}
+ *
+ */
+function dvbanner_update_4 () {
+	$ret = array ();
+	
+	$ret[] = update_sql (
+		"ALTER TABLE {dvbanner_block} ADD pid int(10) NOT NULL AFTER title"
+	);
+	
+	return $ret;
+}

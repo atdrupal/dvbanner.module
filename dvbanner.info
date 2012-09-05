@@ -1,0 +1,6 @@
+; $Id: dvbanner.info 521 2008-11-28 08:55:05Z The Hong $
+
+name = D.V.Banner
+version = 5.x-4.x-dev
+description = Upload image, flash, video banners and displaying theme as system block
+dependencies = imagecache
